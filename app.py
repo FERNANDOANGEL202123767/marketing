@@ -8,35 +8,14 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 import json
 from io import StringIO
-import subprocess
-import time
-import threading
+import os
 
 
 app = Flask(__name__)
 
-# Configuración (puedes mover esto a un archivo Config.py si prefieres)
-class Config:
-    NGROK_DOMAIN = 'poorly-free-insect.ngrok-free.app'
-    FLASK_PORT = 5000
-
-# Función para iniciar ngrok en un hilo separado
-def start_ngrok(domain, port):
-    def run():
-        time.sleep(2)
-        process = subprocess.Popen(
-            ['ngrok', 'http', '--domain='+domain, str(port)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        time.sleep(2)
-        print(f"\n* NGROK URL FIJADA: https://{domain} -> http://localhost:{port} *\n")
-        return process
-    
-    ngrok_thread = threading.Thread(target=run)
-    ngrok_thread.daemon = True
-    ngrok_thread.start()
-    return ngrok_thread
+# Configuración para Render
+# Obtener el puerto desde la variable de entorno PORT que proporciona Render
+port = int(os.environ.get("PORT", 5000))
 
 # Cargar y procesar datos
 def load_data():
@@ -453,8 +432,5 @@ def task10():
     })
 
 if __name__ == '__main__':
-    # Iniciar ngrok en un hilo separado
-    start_ngrok(Config.NGROK_DOMAIN, Config.FLASK_PORT)
-    
-    # Iniciar la aplicación Flask
-    app.run(port=Config.FLASK_PORT, debug=True)
+    # Iniciar la aplicación Flask en el puerto que provee Render y en 0.0.0.0
+    app.run(host='0.0.0.0', port=port, debug=False)
