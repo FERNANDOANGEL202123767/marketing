@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template,request, send_from_directory
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -9,9 +9,20 @@ from sklearn.decomposition import PCA
 import json
 from io import StringIO
 import os
+import base64
+import plotly.graph_objects as go
+import io  # Añadimos esta importación
+import base64
 
+# ... (código existente de app.py)
 
 app = Flask(__name__)
+
+os.makedirs('static', exist_ok=True)
+
+@app.route('/static/<path:path>')
+def serve_static(path):
+    return send_from_directory('static', path)
 
 # Configuración para Render
 # Obtener el puerto desde la variable de entorno PORT que proporciona Render
@@ -355,6 +366,261 @@ def task9():
             ]
         }
     })
+    
+
+
+
+@app.route('/api/mri-report', methods=['POST'])
+def mri_report():
+    try:
+        # Obtener datos de JSON, query params o form-data
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {
+                'diagnosis': request.form.get('diagnosis', request.args.get('diagnosis', 'No diagnosis')),
+                'confidence': request.form.get('confidence', request.args.get('confidence', '0'))
+            }
+        
+        diagnosis = data.get('diagnosis', 'No diagnosis')
+        confidence = data.get('confidence', 0)
+        
+        # Convertir confidence a float
+        try:
+            confidence = float(confidence)
+        except (ValueError, TypeError):
+            print(f"[ERROR] Confidence inválido: {confidence}")
+            return jsonify({'status': 'error', 'message': 'Confidence debe ser un número válido'}), 400
+        
+        print(f"[DEBUG] mri-report - Diagnosis: {diagnosis}, Confidence: {confidence}")
+        
+        # Crear gráfica de barras
+        fig = go.Figure(data=[
+            go.Bar(
+                x=['Confianza'],
+                y=[confidence],
+                text=[f'{confidence:.2f}%'],
+                textposition='auto',
+                marker_color='#4CA1AF' if 'No se detectó' in diagnosis else '#D4F483'
+            )
+        ])
+        fig.update_layout(
+            title=f'Resultado del Análisis MRI: {diagnosis}',
+            yaxis_title='Porcentaje',
+            xaxis_title='',
+            showlegend=False,
+            height=300,
+            width=400,
+            margin=dict(l=40, r=40, t=40, b=40)
+        )
+        
+        # Generar imagen PNG
+        buffer = io.BytesIO()
+        fig.write_image(buffer, format='png', scale=1)
+        buffer.seek(0)
+        
+        # Guardar imagen
+        image_path = 'static/mri-report.png'
+        with open(image_path, 'wb') as f:
+            f.write(buffer.getvalue())
+        
+        # Generar URL
+        graph_html = f'<img src="/static/mri-report.png" alt="Gráfica MRI" style="max-width: 100%; height: auto;">'
+        
+        return jsonify({
+            'status': 'success',
+            'diagnosis': diagnosis,
+            'confidence': confidence,
+            'graph': graph_html
+        })
+    except Exception as e:
+        print(f"[ERROR] mri_report: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/task9-visualization', methods=['GET'])
+def task9_visualization():
+    try:
+        # Datos del autoencoder
+        task9_data = {
+            "connections": [
+                {"source": "input", "target": "enc1"},
+                {"source": "enc1", "target": "enc2"},
+                {"source": "enc2", "target": "bottleneck"},
+                {"source": "bottleneck", "target": "dec1"},
+                {"source": "dec1", "target": "output"}
+            ],
+            "description": {
+                "components": [
+                    {"name": "Encoder", "desc": "Reduce la dimensionalidad de los datos"},
+                    {"name": "Bottleneck", "desc": "Representación comprimida de los datos"},
+                    {"name": "Decoder", "desc": "Reconstruye los datos desde la representación comprimida"}
+                ],
+                "pros": [
+                    "Reducción no lineal de dimensionalidad",
+                    "Capaz de aprender características complejas",
+                    "Útil para datos no etiquetados"
+                ],
+                "cons": [
+                    "Requiere más datos que métodos lineales como PCA",
+                    "Más difícil de interpretar",
+                    "Computacionalmente más costoso"
+                ],
+                "what_is": "Un autoencoder es una red neuronal que aprende a comprimir datos (codificar) y luego reconstruirlos (decodificar)."
+            },
+            "layers": [
+                {"id": "input", "name": "Input", "units": 37, "x": 0.1, "y": 0.5},
+                {"id": "enc1", "name": "Encoder", "units": 50, "x": 0.3, "y": 0.5},
+                {"id": "enc2", "name": "Encoder", "units": 500, "x": 0.5, "y": 0.5},
+                {"id": "bottleneck", "name": "Bottleneck", "units": 8, "x": 0.7, "y": 0.5},
+                {"id": "dec1", "name": "Decoder", "units": 500, "x": 0.9, "y": 0.5},
+                {"id": "output", "name": "Output", "units": 37, "x": 1.1, "y": 0.5}
+            ]
+        }
+        
+        print("[DEBUG] Generando gráfica de autoencoder...")
+        
+        # Configurar datos para la gráfica
+        layers = task9_data["layers"]
+        x_positions = [i for i in range(len(layers))]
+        y_positions = [layer["units"] for layer in layers]
+        labels = [f"{layer['name']} ({layer['units']})" for layer in layers]
+        
+        # Colores para las capas
+        colors = ['#FF6B6B' if layer["name"] in ["Input", "Output"] else '#FFE66D' if layer["name"] == "Bottleneck" else '#4ECDC4' for layer in layers]
+        
+        # Crear gráfica
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=x_positions,
+            y=y_positions,
+            text=labels,
+            textposition='auto',
+            marker_color=colors,
+            showlegend=False
+        ))
+        
+        # Agregar conexiones
+        for i in range(len(x_positions) - 1):
+            fig.add_shape(
+                type="line",
+                x0=x_positions[i] + 0.4,
+                y0=y_positions[i] / 2,
+                x1=x_positions[i + 1] - 0.4,
+                y1=y_positions[i + 1] / 2,
+                line=dict(color="black", width=2)
+            )
+            fig.add_annotation(
+                x=x_positions[i + 1] - 0.4,
+                y=y_positions[i + 1] / 2,
+                ax=x_positions[i] + 0.4,
+                ay=y_positions[i] / 2,
+                xref="x",
+                yref="y",
+                axref="x",
+                ayref="y",
+                arrowhead=2,
+                arrowwidth=2,
+                arrowcolor="black",
+                showarrow=True
+            )
+        
+        fig.update_layout(
+            title='Arquitectura del Autoencoder',
+            xaxis=dict(
+                tickmode='array',
+                tickvals=x_positions,
+                ticktext=[layer["name"] for layer in layers],
+                title="Capas"
+            ),
+            yaxis=dict(title="Unidades", range=[0, max(y_positions) * 1.1]),
+            height=400,
+            width=600,
+            showlegend=False,
+            margin=dict(l=40, r=40, t=40, b=40)
+        )
+        
+        # Generar imagen PNG
+        buffer = io.BytesIO()
+        fig.write_image(buffer, format='png', scale=1)
+        buffer.seek(0)
+        
+        # Guardar imagen
+        image_path = 'static/autoencoder.png'
+        with open(image_path, 'wb') as f:
+            f.write(buffer.getvalue())
+        
+        # Generar URL
+        graph_html = f'<img src="/static/autoencoder.png" alt="Arquitectura del Autoencoder" style="max-width: 100%; height: auto;">'
+        
+        # Generar tabla HTML
+        table_html = """
+        <table style="width: 100%; border: 1px solid #ddd; font-family: Arial, sans-serif;">
+            <thead>
+                <tr style="background-color: #f4f4f4;">
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Componente</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Descripción</th>
+                </tr>
+            </thead>
+            <tbody>
+                {components}
+                <tr>
+                    <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Ventajas</td>
+                    <td style="padding: 10px; border: 1px solid #ddd;">{pros}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Desventajas</td>
+                    <td style="padding: 10px; border: 1px solid #ddd;">{cons}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">¿Qué es?</td>
+                    <td style="padding: 10px; border: 1px solid #ddd;">{what_is}</td>
+                </tr>
+            </tbody>
+        </table>
+        """
+        components_rows = "".join([
+            f'<tr><td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">{comp["name"]}</td><td style="padding: 10px; border: 1px solid #ddd;">{comp["desc"]}</td></tr>'
+            for comp in task9_data["description"]["components"]
+        ])
+        pros = "<br>• ".join([""] + task9_data["description"]["pros"])
+        cons = "<br>• ".join([""] + task9_data["description"]["cons"])
+        what_is = task9_data["description"]["what_is"]
+        table_html = table_html.format(components=components_rows, pros=pros, cons=cons, what_is=what_is)
+        
+        # Generar tabla plain-text
+        plain_table = (
+            "Componente | Descripción\n"
+            "-----------|------------\n" +
+            "\n".join([f"{comp['name']} | {comp['desc']}" for comp in task9_data["description"]["components"]]) +
+            f"\n-----------|------------\n"
+            f"Ventajas | {' • '.join(task9_data['description']['pros'])}\n"
+            f"Desventajas | {' • '.join(task9_data['description']['cons'])}\n"
+            f"¿Qué es? | {task9_data['description']['what_is']}"
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'data': task9_data,
+            'graph': graph_html,
+            'table': table_html,
+            'plain_table': plain_table,
+            'debug_info': {
+                'image_size': os.path.getsize(image_path),
+                'has_image': os.path.exists(image_path)
+            }
+        })
+    except Exception as e:
+        print(f"[ERROR] task9_visualization: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'graph': '<p style="color: red;">Error generando gráfica del autoencoder</p>',
+            'table': table_html,
+            'plain_table': plain_table
+        }), 500
 
 @app.route('/api/task10')
 def task10():
@@ -430,6 +696,8 @@ def task10():
         ],
         "cluster_colors": ["#4CA1AF", "#2C3E50", "#D4B483"]
     })
+    
+    
 
 if __name__ == '__main__':
     # Iniciar la aplicación Flask en el puerto que provee Render y en 0.0.0.0
